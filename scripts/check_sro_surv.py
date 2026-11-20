@@ -34,14 +34,27 @@ def main():
     model = SROSurv(6, [4, 5], c)
     p = torch.randn(4, 12, 6)
     g = [torch.randn(4, 4), torch.randn(4, 5)]
-    z, parts, _ = model(
-        p, g, torch.ones(4, 12, dtype=torch.bool), torch.ones(4, 2, dtype=torch.bool)
-    )
+    inputs = p, g, torch.ones(4, 12, dtype=torch.bool), torch.ones(4, 2, dtype=torch.bool)
+    z, parts, _ = model(*inputs)
     discrete_hazard_nll(z, torch.arange(4), torch.ones(4, dtype=torch.bool)).backward()
     for m in ("p", "g"):
         assert parts[m][0].shape == (4, 8, 16)
         assert model.encoders[m].queries.grad.norm(dim=-1).gt(0).all()
         assert model.weights[m].grad.abs().gt(0).all()
+    if c.get("read_loss") == "sro":
+        model.eval()
+        penalties = []
+        with_penalty, _, _ = model(*inputs, penalties=penalties)
+        assert torch.equal(model(*inputs)[0], with_penalty)
+        rounds = len(model.read_rounds)
+        assert len(penalties) == rounds * len(model.read_modalities)
+        for index, modality in enumerate(model.read_modalities):
+            start = index * rounds
+            penalty = torch.stack(penalties[start:start + rounds]).mean()
+            gradient = torch.autograd.grad(
+                penalty, model.encoders[modality].queries, retain_graph=True
+            )[0]
+            assert torch.isfinite(gradient).all() and gradient.norm() > 0
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         manifest = invent_prepared(root, count=32, features=6)
@@ -49,7 +62,11 @@ def main():
         one = run_sro_surv(root, out, manifest, c, {}, synthetic=True)
         assert one["checkpoint_reload_verified"]
         log = one["epoch_logs"][0]
-        assert set(log["validation"]["read_trace"]["p"]) == {1, 5, 10}
+        assert all(
+            set(log["validation"]["read_trace"][m]) == {1, 5, 10} for m in ("p", "g")
+        )
+        assert set(log["train_read_loss_by_modality"]) == set(model.read_modalities)
+        assert all(value > 0 for value in log["train_read_loss_by_modality"].values())
         if c.get("read_loss"):
             assert log["read_loss_weight"] > 0 and log["train_read_loss"] > 0
         else:
@@ -58,7 +75,7 @@ def main():
         two = run_sro_surv(root, out, manifest, c, {}, synthetic=True, resume=True)
         assert len(two["epoch_logs"]) == 2 and two["checkpoint_reload_verified"]
     print(
-        "PASS: both query banks, 16 weights, survival NLL, validation, resume and checkpoint replay"
+        "PASS: both query banks, selected SRO gradients, validation, resume and checkpoint replay"
     )
 
 

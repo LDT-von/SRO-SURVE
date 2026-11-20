@@ -1,6 +1,6 @@
 # SRO-Surv
 
-Slot Read Overlap Regularization for Survival Prediction. The default configuration uses SRO on all 10 histopathology slot iterations, with margin 0.90.
+Slot Read Overlap Regularization for Survival Prediction. The default configuration applies SRO to all 10 slot iterations in both histopathology and omics, with margin 0.90. The weight for each modality ramps to 0.10. Existing SRO configs without `read_loss_modalities` still apply SRO to histopathology only.
 
 From this folder:
 
@@ -14,9 +14,10 @@ The first command prints the configuration. The second runs a small synthetic in
 - Model and training engine: `research_models/sro_surv/`
 - Default configuration: `configs/sro_surv_v1.json`
 - Explicit no-SRO control: `configs/scaled_slot16_v2.json`
+- [问题查找实验](PROBLEM_FINDING_EXPERIMENTS.md)
 - Shared runtime and original SlotSPE source: `research_models/common_private_synergy/`, `slotspe_proof/`, and `third_party/SlotSPE/`
 - Python dependencies: `requirements-audit.txt`. Use a compatible existing PyTorch environment.
 
 Patient execution is opt-in via `--run --prepared-root <existing-prepared-directory> --output-root <fresh-directory>`. The prepared directory and source referenced by its configuration must be available and pass the recorded split and source checks. Run outputs must be kept inside this project's ignored `local_evidence/`. This package contains source and configuration files only. Use the source attribution in `NOTICE.md`. `SOURCE_SNAPSHOT.json` records export provenance and SHA-256 checksums.
 
-Running the synthetic check does not establish performance on patients.
+The synthetic check verifies the implementation. The numbered experiments describe which behaviors were observed and which require patient validation.

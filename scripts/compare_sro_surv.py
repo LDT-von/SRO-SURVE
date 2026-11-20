@@ -1,4 +1,4 @@
-"""Compare pathology slot redundancy with and without SRO on one prepared fold."""
+"""Compare pathology and omics slot redundancy with and without SRO."""
 
 import argparse
 import json
@@ -59,27 +59,28 @@ def run_arm(name, config, prepared, output):
 def final_diagnostics(receipt):
     last = receipt["epoch_logs"][-1]
     validation = last["validation"]
-    readings = validation["read_trace"]["p"]
-    pathology = validation["slots"]["p"]
-    return {
-        "metrics": {
-            "pathology_read_BC_round_1": readings["1"]["read_BC"],
-            "pathology_read_BC_round_5": readings["5"]["read_BC"],
-            "pathology_read_BC_round_10": readings["10"]["read_BC"],
-            "pathology_message_cosine_round_10": readings["10"]["message_cosine"],
-            "pathology_slot_pair_cosine": pathology["pair_cosine_mean"],
-            "pathology_zero_slot_fraction": pathology["zero_slot_fraction"],
-            "pathology_across_patient_std_rms": pathology["across_patient_std_rms"],
-            "validation_C_index": validation["C_index"],
-            "validation_NLL": validation["NLL"],
-        },
-        "validation_patients": pathology["patients"],
-        "pathology_trace": readings,
-        "pathology_slot_summary": pathology,
-        "pathology_readout_deletion_delta_NLL": validation["readout_deletion_delta_NLL"]["p"],
+    metrics = {}
+    result = {
+        "metrics": metrics,
+        "validation_patients": validation["slots"]["p"]["patients"],
         "train_read_loss": last["train_read_loss"],
+        "train_read_loss_by_modality": last["train_read_loss_by_modality"],
         "read_loss_weight": last["read_loss_weight"],
     }
+    for key, name in (("p", "pathology"), ("g", "omics")):
+        readings = validation["read_trace"][key]
+        summary = validation["slots"][key]
+        for iteration in ("1", "5", "10"):
+            metrics[f"{name}_read_BC_round_{iteration}"] = readings[iteration]["read_BC"]
+        metrics[f"{name}_message_cosine_round_10"] = readings["10"]["message_cosine"]
+        metrics[f"{name}_slot_pair_cosine"] = summary["pair_cosine_mean"]
+        metrics[f"{name}_zero_slot_fraction"] = summary["zero_slot_fraction"]
+        metrics[f"{name}_across_patient_std_rms"] = summary["across_patient_std_rms"]
+        result[f"{name}_trace"] = readings
+        result[f"{name}_slot_summary"] = summary
+        result[f"{name}_readout_deletion_delta_NLL"] = validation["readout_deletion_delta_NLL"][key]
+    metrics.update(validation_C_index=validation["C_index"], validation_NLL=validation["NLL"])
+    return result
 
 
 def format_value(value):
@@ -113,7 +114,7 @@ def main():
     if args.device is not None:
         sro["device"] = args.device
     control = dict(sro)
-    for key in ("read_loss", "read_loss_rounds", "sro_margin"):
+    for key in ("read_loss", "read_loss_modalities", "read_loss_rounds", "sro_margin"):
         del control[key]
 
     output.mkdir(parents=True)
@@ -131,7 +132,7 @@ def main():
     treatment = final_diagnostics(sro_receipt)
     deltas = {}
     print(f"\nDevelopment validation at epoch {args.epochs}")
-    print(f"{'Metric':42} {'No SRO':>11} {'SRO':>11} {'SRO - No SRO':>13}")
+    print(f"{'Metric':42} {'No SRO':>11} {'Both sides':>11} {'SRO - No SRO':>13}")
     for metric, before in baseline["metrics"].items():
         after = treatment["metrics"][metric]
         delta = None if before is None or after is None else after - before
@@ -149,6 +150,7 @@ def main():
         "batch_size": sro["batch_size"],
         "patch_budget": sro["patches"],
         "device": sro["device"],
+        "sro_modalities": sro["read_loss_modalities"],
         "prepared_manifest_sha256": manifest_hash,
         "split_identity_sha256": sro_receipt["split_identity"]["identity_sha256"],
         "no_sro": baseline,

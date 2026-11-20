@@ -34,6 +34,16 @@ def validate_protocol(c):
         ("risk_pair", (1, 10)),
     ):
         raise ValueError("unknown read loss or iteration schedule")
+    if "read_loss_modalities" in c:
+        modalities = c["read_loss_modalities"]
+        if (
+            c.get("read_loss") != "sro"
+            or not isinstance(modalities, list)
+            or not modalities
+            or any(m not in ("p", "g") for m in modalities)
+            or len(set(modalities)) != len(modalities)
+        ):
+            raise ValueError("SRO modalities must be a nonempty list of distinct p/g values")
     if "sro_margin" in c:
         margin = c["sro_margin"]
         if (
@@ -298,7 +308,7 @@ def run_sro_surv(
     for epoch in range(len(logs) + 1, c["task_epochs"] + 1):
         model.train()
         order = torch.randperm(len(train), generator=rng).tolist()
-        aux_total = 0.0
+        aux_totals = dict.fromkeys(model.read_modalities, 0.0)
         survival_total = 0.0
         weight = 0.10 * warmup_factor(epoch) if model.read_rounds else 0.0
         for i in range(0, len(order), c["batch_size"]):
@@ -317,9 +327,13 @@ def run_sro_surv(
             loss = discrete_hazard_nll(z, b["completed"], b["event"])
             survival_total += loss.detach().item() * len(ids)
             if penalties:
-                auxiliary = torch.stack(penalties).mean()
-                aux_total += auxiliary.detach().item() * len(ids)
-                loss = loss + weight * auxiliary
+                # Keep each modality's weight when enabling the other modality.
+                side_losses = torch.stack(penalties).reshape(
+                    len(model.read_modalities), len(model.read_rounds)
+                ).mean(1)
+                for m, value in zip(model.read_modalities, side_losses.detach().tolist()):
+                    aux_totals[m] += value * len(ids)
+                loss = loss + weight * side_losses.sum()
             if not torch.isfinite(loss):
                 raise FloatingPointError("nonfinite survival loss")
             optim.zero_grad(set_to_none=True)
@@ -338,7 +352,8 @@ def run_sro_surv(
                 **row,
                 validation=metrics,
                 train_NLL=survival_total / len(train),
-                train_read_loss=aux_total / len(train),
+                train_read_loss=sum(aux_totals.values()) / len(train),
+                train_read_loss_by_modality={m: value / len(train) for m, value in aux_totals.items()},
                 read_loss_weight=weight,
             )
         )

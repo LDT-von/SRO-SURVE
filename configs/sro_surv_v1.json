@@ -21,6 +21,7 @@
   "reconstruction_heads": "deferred",
   "slots_per_modality": 8,
   "read_loss": "sro",
+  "read_loss_modalities": ["p", "g"],
   "read_loss_rounds": [
     1,
     2,

@@ -85,6 +85,8 @@ class SROSurv(nn.Module):
         self.pair_split = c.get("read_loss") in ("duplicate_pair", "risk_pair")
         self.risk_pair = c.get("read_loss") == "risk_pair"
         self.read_rounds = tuple(c.get("read_loss_rounds", ()))
+        selected = c.get("read_loss_modalities", ("p",)) if self.read_rounds else ()
+        self.read_modalities = tuple(m for m in ("p", "g") if m in selected)
         self.sro_margin = c.get("sro_margin", 0.90)
         width = c["width"]
         self.omics_encoder = PathwayOmicsEncoder(
@@ -114,7 +116,7 @@ class SROSurv(nn.Module):
             slots, attention, fraction = self.encoders[m](
                 x,
                 mask,
-                read_rounds=self.read_rounds if m == "p" else (),
+                read_rounds=self.read_rounds if m in self.read_modalities else (),
                 penalties=penalties,
                 pair_split=self.pair_split,
                 sro_margin=self.sro_margin,
